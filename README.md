@@ -4,6 +4,7 @@ TECH STACK
 - Python 3.10+
 - Jupyter Notebook
 - No external dependencies
+
 QUICK START
 1. Clone: git clone https://github.com/abhishekwalikar-pixel/Python_tasks.git
 2. Open: jupyter notebook python_basic_tasks.ipynb
