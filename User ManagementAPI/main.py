@@ -1,136 +1,388 @@
-from fastapi import FastAPI, Request
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from pydantic import BaseModel, EmailStr
+from typing import Optional, Literal
+from passlib.context import CryptContext
+from jose import jwt, JWTError
+from datetime import datetime, timedelta
 
-# Database connection string
-DATABASE_URL = "mysql+pymysql://root:@localhost/usersdatabase"
+# ==========================================
+# DATABASE CONFIGURATION
+# ==========================================
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-Session = sessionmaker(bind=engine)
+DATABASE_URL = "mysql+pymysql://root:root123@localhost:3306/realestate_db"
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# ---------------- USERS TABLE ----------------
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ==========================================
+# JWT CONFIGURATION
+# ==========================================
+
+SECRET_KEY = "mysecretkey123"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+security = HTTPBearer()
+
+# ==========================================
+# PASSWORD HASHING
+# ==========================================
+
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto"
+)
+
+def hash_password(password):
+    return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(
+        plain_password,
+        hashed_password
+    )
+
+# ==========================================
+# DATABASE MODEL
+# ==========================================
+
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100))
-    mobile = Column(String(15))
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
+    password = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False)
 
-# ---------------- REGISTERED USERS TABLE ----------------
-class RegisteredUser(Base):
-    __tablename__ = "registered_users"
+Base.metadata.create_all(bind=engine)
 
-    id = Column(Integer, primary_key=True)
-    username = Column(String(100), unique=True)
-    email = Column(String(100))
-    password = Column(String(100))
+# ==========================================
+# FASTAPI APP
+# ==========================================
 
-# Try to create tables, but don't fail if database is not accessible
-try:
-    Base.metadata.create_all(engine)
-    print("✓ Database tables created successfully")
-except Exception as e:
-    print(f"⚠ Warning: Could not create database tables: {e}")
-    print("Make sure MySQL is running and credentials are correct.")
+app = FastAPI(title="User Management API")
 
-app = FastAPI()
+# ==========================================
+# PYDANTIC MODELS
+# ==========================================
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+class UserRegister(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    role: Literal["admin", "user"]
 
-# ---------------- REGISTER ----------------
-@app.post("/register")
-async def register(request: Request):
-    data = await request.json()
-    session = Session()
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
 
-    check = session.query(RegisteredUser).filter_by(username=data["username"]).first()
-    if check:
-        session.close()
-        return JSONResponse(content={"msg": "User already exists"}, status_code=400)
+# User can update only name and email
+class UserSelfUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
 
-    obj = RegisteredUser(
-        username=data["username"],
-        email=data["email"],
-        password=data["password"]
+# Admin can update name, email and role
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    role: Optional[Literal["admin", "user"]] = None
+
+# ==========================================
+# JWT FUNCTIONS
+# ==========================================
+
+def create_access_token(data: dict):
+    payload = data.copy()
+
+    payload["exp"] = (
+        datetime.utcnow() +
+        timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    session.add(obj)
-    session.commit()
-    session.close()
 
-    return JSONResponse(content={"msg": "Registered Successfully"}, status_code=200)
+    return jwt.encode(
+        payload,
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
 
-# ---------------- LOGIN ----------------
-@app.post("/login")
-async def login(request: Request):
-    data = await request.json()
-    # Here sqlalchemy session starts
-    session = Session() 
+# ==========================================
+# AUTHENTICATION
+# ==========================================
 
-    user = session.query(RegisteredUser).filter_by(
-        username=data["username"],
-        password=data["password"]
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+        return payload
+
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or Expired Token"
+        )
+
+# ==========================================
+# ADMIN CHECK
+# ==========================================
+
+def admin_required(
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+
+    return current_user
+
+# ==========================================
+# AUTH ROUTES
+# ==========================================
+
+@app.post("/register", tags=["Auth"])
+def register(
+    user: UserRegister,
+    db: Session = Depends(get_db)
+):
+
+    existing_user = db.query(User).filter(
+        User.email == user.email
     ).first()
-    # Here sqlalchemy session stops
-    session.close()
 
-    if user:
-        return JSONResponse(content={"msg": "Login Successful"}, status_code=200)
-    else:
-        return JSONResponse(content={"msg": "Invalid Username or Password"}, status_code=401)
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already exists"
+        )
 
-# ---------------- CREATE ----------------
-@app.post("/add_users")
-async def add(request: Request):
-    data = await request.json()
-    session = Session()
-    obj = User(name=data["name"], mobile=data["mobile"])
-    session.add(obj)
-    session.commit()
-    session.close()
-    return JSONResponse(content={"msg": "added"})
+    new_user = User(
+        name=user.name,
+        email=user.email,
+        password=hash_password(user.password),
+        role=user.role
+    )
 
-# ---------------- READ ----------------
-@app.get("/all")
-def get_all():
-    session = Session()
-    rows = session.query(User).all()
-    session.close()
-    return [{"id": r.id, "name": r.name, "mobile": r.mobile} for r in rows]
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
 
-# ---------------- UPDATE ----------------
-@app.put("/update/{id}")
-async def update(id: int, request: Request):
-    data = await request.json()
-    session = Session()
-    obj = session.query(User).filter_by(id=id).first()
+    return {
+        "message": "User Registered Successfully"
+    }
 
-    obj.name = data.get("name", obj.name)
-    obj.mobile = data.get("mobile", obj.mobile)
+@app.post("/login", tags=["Auth"])
+def login(
+    user: UserLogin,
+    db: Session = Depends(get_db)
+):
 
-    session.commit()
-    session.close()
-    return JSONResponse(content={"msg": "updated"})
+    db_user = db.query(User).filter(
+        User.email == user.email
+    ).first()
 
-# ---------------- DELETE ----------------
-@app.delete("/delete/{id}")
-def delete(id: int):
-    session = Session()
-    obj = session.query(User).filter_by(id=id).first()
-    session.delete(obj)
-    session.commit()
-    session.close()
-    return JSONResponse(content={"msg": "deleted"})
+    if not db_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Email"
+        )
 
-# ---------------- HOME ----------------
+    if not verify_password(
+        user.password,
+        db_user.password
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Password"
+        )
+
+    token = create_access_token(
+        {
+            "user_id": db_user.id,
+            "email": db_user.email,
+            "role": db_user.role
+        }
+    )
+
+    return {
+        "message": "Login Successful",
+        "access_token": token,
+        "token_type": "bearer",
+        "role": db_user.role
+    }
+
+# ==========================================
+# ADMIN ROUTES
+# ==========================================
+
+@app.get("/users", tags=["Admin"])
+def get_all_users(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(admin_required)
+):
+    return db.query(User).all()
+
+@app.put("/admin/users/{user_id}", tags=["Admin"])
+def admin_update_user(
+    user_id: int,
+    updates: AdminUserUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(admin_required)
+):
+
+    user = db.query(User).filter(
+        User.id == user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User Not Found"
+        )
+
+    if user.role == "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin cannot update another admin"
+        )
+
+    if updates.name:
+        user.name = updates.name
+
+    if updates.email:
+        user.email = updates.email
+
+    if updates.role:
+        user.role = updates.role
+
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User Updated Successfully",
+        "data": user
+    }
+
+
+@app.delete("/users/{user_id}", tags=["Admin"])
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(admin_required)
+):
+
+    user = db.query(User).filter(
+        User.id == user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User Not Found"
+        )
+
+    if user.role == "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin cannot delete another admin"
+        )
+
+    db.delete(user)
+    db.commit()
+
+    return {
+        "message": "User Deleted Successfully"
+    }
+
+# ==========================================
+# USER ROUTES
+# ==========================================
+
+@app.get("/users/{user_id}", tags=["User"])
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+
+    if (
+        current_user["role"] != "admin"
+        and current_user["user_id"] != user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Access Denied"
+        )
+
+    user = db.query(User).filter(
+        User.id == user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User Not Found"
+        )
+
+    return user
+
+@app.put("/users/me", tags=["User"])
+def update_my_profile(
+    updates: UserSelfUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+
+    user = db.query(User).filter(
+        User.id == current_user["user_id"]
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User Not Found"
+        )
+
+    if updates.name:
+        user.name = updates.name
+
+    if updates.email:
+        user.email = updates.email
+
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "Profile Updated Successfully",
+        "data": user
+    }
+
+# ==========================================
+# HOME ROUTE
+# ==========================================
+
 @app.get("/")
 def home():
-    return {"msg": "FastAPI CRUD is running successfully"}
+    return {
+        "message": "User Management API Running Successfully"
+    }
+
