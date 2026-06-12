@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Property - Real Estate Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>🏠 Real Estate Platform</h1>
+        <div class="nav-links">
+            <a href="dashboard.html">Dashboard</a>
+            <a href="index.html">Properties</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+    </nav>
+
+    <div class="property-form-container">
+        <h2>List a New Property</h2>
+        
+        <form id="addPropertyForm">
+            <!-- Title & Price -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="title">Property Title</label>
+                    <input type="text" id="title" required placeholder="e.g., Modern 3BHK Apartment">
+                </div>
+                <div class="form-group">
+                    <label for="price">Price ($)</label>
+                    <input type="number" id="price" required placeholder="e.g., 500000">
+                </div>
+            </div>
+
+            <!-- Description -->
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" rows="4" placeholder="Describe the property..."></textarea>
+            </div>
+
+            <!-- Types -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="listing_type">Listing Type</label>
+                    <select id="listing_type" required>
+                        <option value="sale">For Sale</option>
+                        <option value="rent">For Rent</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="property_type">Property Type</label>
+                    <select id="property_type" required>
+                        <option value="apartment">Apartment</option>
+                        <option value="house">House</option>
+                        <option value="villa">Villa</option>
+                        <option value="commercial">Commercial</option>
+                        <option value="land">Land</option>
+                        <option value="office">Office</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Location -->
+            <div class="form-group">
+                <label for="address">Address</label>
+                <input type="text" id="address" required placeholder="Street address">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="city">City</label>
+                    <input type="text" id="city" required>
+                </div>
+                <div class="form-group">
+                    <label for="state">State</label>
+                    <input type="text" id="state" required>
+                </div>
+                <div class="form-group">
+                    <label for="country">Country</label>
+                    <input type="text" id="country" required>
+                </div>
+            </div>
+
+            <!-- Details -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="bedrooms">Bedrooms</label>
+                    <input type="number" id="bedrooms" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="bathrooms">Bathrooms</label>
+                    <input type="number" id="bathrooms" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="area_sqft">Area (sq ft)</label>
+                    <input type="number" id="area_sqft" min="0">
+                </div>
+            </div>
+
+            <!-- Extras -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="year_built">Year Built</label>
+                    <input type="number" id="year_built" min="1800" max="2099">
+                </div>
+                <div class="form-group">
+                    <label for="parking_spaces">Parking Spaces</label>
+                    <input type="number" id="parking_spaces" min="0" value="0">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="is_furnished">
+                    <label for="is_furnished">Is Furnished?</label>
+                </div>
+            </div>
+
+            <button type="submit" class="btn" style="margin-top: 20px;">Submit Property</button>
+        </form>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/property.js"></script>
+    <script>
+        requireAuth();
+
+        document.getElementById('addPropertyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const propertyData = {
+                title: document.getElementById('title').value,
+                price: parseFloat(document.getElementById('price').value),
+                description: document.getElementById('description').value,
+                listing_type: document.getElementById('listing_type').value,
+                property_type: document.getElementById('property_type').value,
+                address: document.getElementById('address').value,
+                city: document.getElementById('city').value,
+                state: document.getElementById('state').value,
+                country: document.getElementById('country').value,
+                bedrooms: parseInt(document.getElementById('bedrooms').value) || 0,
+                bathrooms: parseInt(document.getElementById('bathrooms').value) || 0,
+                area_sqft: parseFloat(document.getElementById('area_sqft').value) || null,
+                year_built: parseInt(document.getElementById('year_built').value) || null,
+                parking_spaces: parseInt(document.getElementById('parking_spaces').value) || 0,
+                is_furnished: document.getElementById('is_furnished').checked,
+                amenity_ids: [] 
+            };
+
+            await createProperty(propertyData);
+        });
+    </script>
+</body>
+</html>

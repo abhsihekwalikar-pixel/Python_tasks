@@ -3,108 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Real Estate Platform</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Redirecting...</title>
 </head>
 <body>
-    <nav class="navbar">
-        <h1>🏠 Real Estate Platform</h1>
-        <div class="nav-links">
-            <a href="dashboard.html">Dashboard</a>
-            <a href="index.html">Properties</a>
-            <a href="#" onclick="logout()">Logout</a>
-        </div>
-    </nav>
-
-    <div class="container">
-        <div class="dashboard-header">
-            <h2>Welcome to Your Dashboard</h2>
-            <p id="userInfo">Loading user info...</p>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <h3 id="totalProperties">0</h3>
-                <p>My Properties</p>
-            </div>
-            <div class="stat-card">
-                <h3 id="totalFavorites">0</h3>
-                <p>Favorites</p>
-            </div>
-            <div class="stat-card">
-                <h3 id="totalInquiries">0</h3>
-                <p>Inquiries</p>
-            </div>
-        </div>
-
-        <div style="margin-top: 40px;">
-            <h2>My Properties</h2>
-            <div id="myPropertiesContainer" class="properties-grid">
-                <p>Loading your properties...</p>
-            </div>
-        </div>
-    </div>
-
     <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
     <script>
-        // Check authentication
-        if (!requireAuth()) {
-            // Redirect handled by requireAuth()
+        // Redirect to the correct dashboard based on role
+        if (!isLoggedIn()) {
+            window.location.href = 'login.html';
+        } else if (getUserRole() === 'admin') {
+            window.location.href = 'admin-dashboard.html';
+        } else {
+            window.location.href = 'user-dashboard.html';
         }
-
-        // Load user data
-        async function loadDashboard() {
-            const token = localStorage.getItem('token');
-            const role = localStorage.getItem('role');
-
-            try {
-                // Get current user info
-                const userResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.endpoints.users}/me`, {
-                    headers: getAuthHeaders()
-                });
-                
-                if (userResponse.ok) {
-                    const user = await userResponse.json();
-                    document.getElementById('userInfo').textContent = 
-                        `Logged in as: ${user.name} (${user.email}) - Role: ${user.role}`;
-                }
-
-                // Load properties (if admin/owner, load their properties)
-                const propsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.endpoints.properties}`, {
-                    headers: getAuthHeaders()
-                });
-                
-                if (propsResponse.ok) {
-                    const properties = await propsResponse.json();
-                    document.getElementById('totalProperties').textContent = properties.length;
-                    
-                    // Display properties
-                    const container = document.getElementById('myPropertiesContainer');
-                    if (properties.length === 0) {
-                        container.innerHTML = '<p>You haven\'t listed any properties yet.</p>';
-                    } else {
-                        container.innerHTML = properties.map(property => `
-                            <div class="property-card">
-                                <div class="property-info">
-                                    <h3>${property.title}</h3>
-                                    <div class="property-price">$${property.price.toLocaleString()}</div>
-                                    <div class="property-details">
-                                        <p>${property.city}, ${property.state}</p>
-                                        <p>Status: ${property.status}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('');
-                    }
-                }
-
-            } catch (error) {
-                console.error('Error loading dashboard:', error);
-            }
-        }
-
-        // Initialize dashboard
-        loadDashboard();
     </script>
 </body>
 </html>

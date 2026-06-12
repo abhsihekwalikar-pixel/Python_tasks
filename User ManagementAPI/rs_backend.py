@@ -2,113 +2,60 @@
 # IMPORTS
 # ==========================================
 
-# importing the main fastapi stuff
 from fastapi import FastAPI, Depends, HTTPException 
-# FastAPI is the core framework
-# Depends is for injecting stuff like db sessions or auth checks
-# HTTPException is how we throw proper error codes (404, 401, etc.)
-
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-# this just tells FastAPI to look for the Bearer token in the request headers
-
-# sqlalchemy stuff for the database ORM
 from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, Boolean, ForeignKey, Enum
-# create_engine connects us to the mysql db
-# Column, Integer, String etc define our table columns and types
-# ForeignKey links tables together (like property to user)
-# Enum restricts a column to specific allowed values
-
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
-# declarative_base is the base class all our db models inherit from
-# sessionmaker creates the db sessions
-# Session is just for type hinting
-# relationship handles the links between tables in python
-
-# pydantic for data validation
 from pydantic import BaseModel, EmailStr
-# BaseModel is for our request/response schemas
-# EmailStr automatically validates if an email is actually formatted correctly
-
-# typing stuff for type hints
 from typing import Optional, Literal, List
-# Optional means the field isn't required
-# Literal locks a string down to exact choices (like "admin" or "user")
-# List means we're expecting an array of items
-
-# security imports
 from passlib.context import CryptContext
-# using passlib to hash passwords securely
-
 from jose import jwt, JWTError
-# jose for creating and decoding JWT tokens
-# JWTError is what gets thrown if a token is bad or expired
-
 from datetime import datetime, timedelta
-# datetime for current time, timedelta to add time (like token expiry)
-
 import enum
-# standard python enum library
-
+from fastapi.middleware.cors import CORSMiddleware
 
 # ==========================================
 # DATABASE CONFIGURATION
 # ==========================================
 
-# db connection string for mysql
 DATABASE_URL = "mysql+pymysql://root:root123@localhost:3306/realestate_db"
 
-# setting up the engine to connect to the db
 engine = create_engine(DATABASE_URL)
-
-# sessionmaker creates our db sessions
 SessionLocal = sessionmaker(bind=engine)
-
-# base class for all our sqlalchemy models
 Base = declarative_base()
 
-# dependency to get a db session. 
-# fastapi runs this before the route, yields the session, then closes it when done
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
-        db.close() # make sure we close the connection so we don't leak it
-
+        db.close()
 
 # ==========================================
 # JWT & SECURITY CONFIG
 # ==========================================
 
-# jwt config
-# TODO: change this secret key before deploying to production!
 SECRET_KEY = "mysecretkey123"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30 # tokens expire after 30 mins
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# setting up bearer token auth so swagger ui gets the authorize button
 security = HTTPBearer()
 
-# setting up password hashing with bcrypt
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto"
 )
 
-# helper to hash a plain text password
 def hash_password(password):
     return pwd_context.hash(password)
 
-# helper to verify a password against the hash
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
-
 # ==========================================
-# ENUMS (locking down allowed values)
+# ENUMS
 # ==========================================
 
-# defining enums so we don't get random invalid strings in the db
 class PropertyType(str, enum.Enum):
     APARTMENT = "apartment"
     HOUSE = "house"
@@ -132,39 +79,34 @@ class InquiryStatus(str, enum.Enum):
     RESPONDED = "responded"
     CLOSED = "closed"
 
-
 # ==========================================
-# DATABASE MODELS (The Tables)
+# DATABASE MODELS
 # ==========================================
 
-# --- USERS TABLE ---
 class User(Base):
     __tablename__ = "users"
 
-    # columns
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, nullable=False)
-    password = Column(String(255), nullable=False) # 255 to fit the long bcrypt hash
+    password = Column(String(255), nullable=False)
     role = Column(String(20), nullable=False)
     phone = Column(String(20), nullable=True)
     profile_image = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # relationships (these don't create actual columns, just links for sqlalchemy)
     properties = relationship("Property", back_populates="owner")
     favorites = relationship("Favorite", back_populates="user")
     inquiries = relationship("Inquiry", back_populates="user")
     reviews = relationship("Review", back_populates="user")
 
-# --- PROPERTIES TABLE ---
 class Property(Base):
     __tablename__ = "properties"
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True) # Text for long descriptions
+    description = Column(Text, nullable=True)
     price = Column(Float, nullable=False)
     listing_type = Column(Enum(ListingType), nullable=False)
     property_type = Column(Enum(PropertyType), nullable=False)
@@ -180,37 +122,29 @@ class Property(Base):
     year_built = Column(Integer, nullable=True)
     parking_spaces = Column(Integer, nullable=True)
     is_furnished = Column(Boolean, default=False)
-    
-    # linking this to the users table
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False) 
-    
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # relationships
     owner = relationship("User", back_populates="properties")
-    
-    # cascade means if we delete the property, all its images/reviews get wiped out too automatically
     images = relationship("PropertyImage", back_populates="property", cascade="all, delete-orphan")
     amenities = relationship("PropertyAmenity", back_populates="property", cascade="all, delete-orphan")
     favorites = relationship("Favorite", back_populates="property", cascade="all, delete-orphan")
     inquiries = relationship("Inquiry", back_populates="property", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="property", cascade="all, delete-orphan")
 
-# --- PROPERTY IMAGES TABLE ---
 class PropertyImage(Base):
     __tablename__ = "property_images"
 
     id = Column(Integer, primary_key=True, index=True)
-    image_url = Column(String(500), nullable=False) # just storing the url, not the actual image file
-    image_order = Column(Integer, default=0) # for sorting the gallery
-    is_primary = Column(Boolean, default=False) # marks the main cover photo
+    image_url = Column(String(500), nullable=False)
+    image_order = Column(Integer, default=0)
+    is_primary = Column(Boolean, default=False)
     property_id = Column(Integer, ForeignKey("properties.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     property = relationship("Property", back_populates="images")
 
-# --- AMENITIES TABLE ---
 class Amenity(Base):
     __tablename__ = "amenities"
 
@@ -220,9 +154,6 @@ class Amenity(Base):
     
     properties = relationship("PropertyAmenity", back_populates="amenity")
 
-# --- PROPERTY AMENITIES (Junction Table) ---
-# properties can have many amenities, and amenities can belong to many properties
-# so we need this many-to-many junction table to link them up
 class PropertyAmenity(Base):
     __tablename__ = "property_amenities"
 
@@ -233,7 +164,6 @@ class PropertyAmenity(Base):
     property = relationship("Property", back_populates="amenities")
     amenity = relationship("Amenity", back_populates="properties")
 
-# --- FAVORITES TABLE ---
 class Favorite(Base):
     __tablename__ = "favorites"
 
@@ -245,7 +175,6 @@ class Favorite(Base):
     user = relationship("User", back_populates="favorites")
     property = relationship("Property", back_populates="favorites")
 
-# --- INQUIRIES TABLE ---
 class Inquiry(Base):
     __tablename__ = "inquiries"
 
@@ -261,14 +190,13 @@ class Inquiry(Base):
     user = relationship("User", back_populates="inquiries")
     property = relationship("Property", back_populates="inquiries")
 
-# --- REVIEWS TABLE ---
 class Review(Base):
     __tablename__ = "reviews"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     property_id = Column(Integer, ForeignKey("properties.id"), nullable=False)
-    rating = Column(Integer, nullable=False) # 1 to 5 stars
+    rating = Column(Integer, nullable=False)
     title = Column(String(200), nullable=True)
     comment = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -276,29 +204,37 @@ class Review(Base):
     user = relationship("User", back_populates="reviews")
     property = relationship("Property", back_populates="reviews")
 
-# this actually creates all the tables in the db if they don't already exist
+# ==========================================
+# DATABASE INITIALIZATION
+# ==========================================
+# Drop all existing tables and recreate them fresh with the new structure
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
-
 
 # ==========================================
 # FASTAPI APP
 # ==========================================
 
-# initializing the fastapi app
 app = FastAPI(
     title="Real Estate Management API",
     description="Complete backend API for a real estate platform"
 )
 
+# ==========================================
+# CORS MIDDLEWARE
+# ==========================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ==========================================
 # PYDANTIC SCHEMAS
 # ==========================================
 
-# pydantic schemas for validating incoming json. 
-# if the client sends bad data, fastapi auto-rejects it with a 422 error
-
-# --- Auth Schemas ---
 class UserRegister(BaseModel):
     name: str
     email: EmailStr
@@ -322,7 +258,6 @@ class AdminUserUpdate(BaseModel):
     role: Optional[Literal["admin", "user"]] = None
     phone: Optional[str] = None
 
-# --- Property Schemas ---
 class PropertyCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -340,7 +275,7 @@ class PropertyCreate(BaseModel):
     year_built: Optional[int] = None
     parking_spaces: Optional[int] = None
     is_furnished: Optional[bool] = False
-    amenity_ids: Optional[List[int]] = [] # expecting a list of ids like [1, 3, 5]
+    amenity_ids: Optional[List[int]] = []
 
 class PropertyUpdate(BaseModel):
     title: Optional[str] = None
@@ -386,35 +321,27 @@ class ReviewCreate(BaseModel):
     title: Optional[str] = None
     comment: str
 
-
 # ==========================================
-# HELPER FUNCTIONS (JWT & Auth)
+# HELPER FUNCTIONS
 # ==========================================
 
-# creates the jwt token when a user logs in
 def create_access_token(data: dict):
     payload = data.copy()
-
-    # setting the expiry time (now + 30 mins)
     payload["exp"] = (
         datetime.utcnow() +
         timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-
-    # encoding the payload into the actual token string
     return jwt.encode(
         payload,
         SECRET_KEY,
         algorithm=ALGORITHM
     )
 
-# dependency to check if user is logged in. runs before protected routes
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security) # fastapi grabs the bearer token automatically
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     token = credentials.credentials
     try:
-        # decoding the token to get the user data back
         payload = jwt.decode(
             token,
             SECRET_KEY,
@@ -422,24 +349,20 @@ def get_current_user(
         )
         return payload
     except JWTError:
-        # if token is bad or expired, kick them out with 401
         raise HTTPException(
             status_code=401,
             detail="Invalid or Expired Token"
         )
 
-# dependency to make sure the logged in user is actually an admin
 def admin_required(
-    current_user: dict = Depends(get_current_user) # relies on the get_current_user dependency above
+    current_user: dict = Depends(get_current_user)
 ):
     if current_user["role"] != "admin":
-        # 403 means they are logged in but don't have permission
         raise HTTPException(
             status_code=403,
             detail="Admin access required"
         )
     return current_user
-
 
 # ==========================================
 # AUTH ROUTES
@@ -447,15 +370,13 @@ def admin_required(
 
 @app.post("/register", tags=["Auth"])
 def register(
-    user: UserRegister, # fastapi validates the incoming json against this schema
-    db: Session = Depends(get_db) # injecting the db session
+    user: UserRegister,
+    db: Session = Depends(get_db)
 ):
-    # checking if email is already taken
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    # creating the user object. hashing the password before saving!
     new_user = User(
         name=user.name,
         email=user.email,
@@ -463,9 +384,9 @@ def register(
         role=user.role,
         phone=user.phone
     )
-    db.add(new_user)      # staging it
-    db.commit()           # actually saving to mysql
-    db.refresh(new_user)  # refreshing to get the auto-generated id
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
     
     return {"message": "User Registered Successfully"}
 
@@ -474,16 +395,13 @@ def login(
     user: UserLogin,
     db: Session = Depends(get_db)
 ):
-    # finding the user by email
     db_user = db.query(User).filter(User.email == user.email).first()
     if not db_user:
         raise HTTPException(status_code=401, detail="Invalid Email")
 
-    # checking if the password matches the hash
     if not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid Password")
 
-    # all good, generating the token
     token = create_access_token({
         "user_id": db_user.id,
         "email": db_user.email,
@@ -497,7 +415,6 @@ def login(
         "role": db_user.role
     }
 
-
 # ==========================================
 # ADMIN ROUTES
 # ==========================================
@@ -505,27 +422,24 @@ def login(
 @app.get("/users", tags=["Admin"])
 def get_all_users(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(admin_required) # only admins can hit this
+    current_user: dict = Depends(admin_required)
 ):
     return db.query(User).all()
 
 @app.put("/admin/users/{user_id}", tags=["Admin"])
 def admin_update_user(
-    user_id: int, # grabbed from the url path
-    updates: AdminUserUpdate, # the json body with fields to update
+    user_id: int,
+    updates: AdminUserUpdate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(admin_required)
 ):
-    # fetching the user to update
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User Not Found")
 
-    # safety check so admins can't mess with other admins
     if user.role == "admin":
         raise HTTPException(status_code=403, detail="Admin cannot update another admin")
 
-    # only updating fields that were actually sent in the request
     if updates.name: user.name = updates.name
     if updates.email: user.email = updates.email
     if updates.role: user.role = updates.role
@@ -552,7 +466,6 @@ def delete_user(
     db.commit()
     return {"message": "User Deleted Successfully"}
 
-
 # ==========================================
 # AMENITY ROUTES
 # ==========================================
@@ -561,7 +474,7 @@ def delete_user(
 def create_amenity(
     amenity: AmenityCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(admin_required) # only admins can add amenities
+    current_user: dict = Depends(admin_required)
 ):
     existing = db.query(Amenity).filter(Amenity.name == amenity.name).first()
     if existing:
@@ -575,7 +488,6 @@ def create_amenity(
 
 @app.get("/amenities", tags=["Amenities"])
 def get_all_amenities(db: Session = Depends(get_db)):
-    # anyone can view the amenities list, no auth required
     return db.query(Amenity).all()
 
 @app.delete("/amenities/{amenity_id}", tags=["Amenities"])
@@ -592,7 +504,6 @@ def delete_amenity(
     db.commit()
     return {"message": "Amenity Deleted Successfully"}
 
-
 # ==========================================
 # PROPERTY ROUTES
 # ==========================================
@@ -601,9 +512,8 @@ def delete_amenity(
 def create_property(
     property_data: PropertyCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user) # must be logged in to list a place
+    current_user: dict = Depends(get_current_user)
 ):
-    # creating the property. auto-assigning the logged in user as the owner
     new_property = Property(
         title=property_data.title,
         description=property_data.description,
@@ -621,13 +531,12 @@ def create_property(
         year_built=property_data.year_built,
         parking_spaces=property_data.parking_spaces,
         is_furnished=property_data.is_furnished,
-        owner_id=current_user["user_id"] 
+        owner_id=current_user["user_id"]
     )
     db.add(new_property)
     db.commit()
     db.refresh(new_property)
     
-    # if they selected amenities, link them in the junction table
     if property_data.amenity_ids:
         for amenity_id in property_data.amenity_ids:
             property_amenity = PropertyAmenity(
@@ -642,7 +551,6 @@ def create_property(
 @app.get("/properties", tags=["Properties"])
 def get_all_properties(
     db: Session = Depends(get_db),
-    # these are query params for filtering (e.g. /properties?city=NewYork&min_price=100000)
     city: Optional[str] = None,
     property_type: Optional[str] = None,
     listing_type: Optional[str] = None,
@@ -651,10 +559,7 @@ def get_all_properties(
     bedrooms: Optional[int] = None
 ):
     query = db.query(Property)
-    
-    # dynamically adding filters if the user provided query params
     if city:
-        # ilike makes it case-insensitive, % means "contains"
         query = query.filter(Property.city.ilike(f"%{city}%"))
     if property_type:
         query = query.filter(Property.property_type == property_type)
@@ -687,11 +592,9 @@ def update_property(
     if not property:
         raise HTTPException(status_code=404, detail="Property Not Found")
     
-    # auth check: only the owner or an admin can update
     if property.owner_id != current_user["user_id"] and current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not authorized to update this property")
     
-    # updating fields if they were sent in the request
     if updates.title: property.title = updates.title
     if updates.description is not None: property.description = updates.description
     if updates.price is not None: property.price = updates.price
@@ -710,11 +613,8 @@ def update_property(
     if updates.parking_spaces is not None: property.parking_spaces = updates.parking_spaces
     if updates.is_furnished is not None: property.is_furnished = updates.is_furnished
     
-    # if they sent new amenity ids, we need to update the junction table
     if updates.amenity_ids is not None:
-        # wipe out the old links first
         db.query(PropertyAmenity).filter(PropertyAmenity.property_id == property_id).delete()
-        # then add the new ones
         for amenity_id in updates.amenity_ids:
             property_amenity = PropertyAmenity(property_id=property_id, amenity_id=amenity_id)
             db.add(property_amenity)
@@ -733,14 +633,12 @@ def delete_property(
     if not property:
         raise HTTPException(status_code=404, detail="Property Not Found")
     
-    # auth check: only owner or admin can delete
     if property.owner_id != current_user["user_id"] and current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not authorized to delete this property")
     
-    db.delete(property) # cascade will auto-delete images/reviews
+    db.delete(property)
     db.commit()
     return {"message": "Property Deleted Successfully"}
-
 
 # ==========================================
 # PROPERTY IMAGE ROUTES
@@ -773,7 +671,6 @@ def add_property_image(
 
 @app.get("/properties/{property_id}/images", tags=["Property Images"])
 def get_property_images(property_id: int, db: Session = Depends(get_db)):
-    # fetching images and sorting them by the order column
     images = db.query(PropertyImage).filter(PropertyImage.property_id == property_id).order_by(PropertyImage.image_order).all()
     return images
 
@@ -799,7 +696,6 @@ def delete_property_image(
     db.commit()
     return {"message": "Image Deleted Successfully"}
 
-
 # ==========================================
 # FAVORITE ROUTES
 # ==========================================
@@ -814,7 +710,6 @@ def add_favorite(
     if not property:
         raise HTTPException(status_code=404, detail="Property Not Found")
     
-    # making sure they don't favorite the same property twice
     existing = db.query(Favorite).filter(
         Favorite.user_id == current_user["user_id"],
         Favorite.property_id == property_id
@@ -836,9 +731,7 @@ def get_my_favorites(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # getting all favorite records for the logged in user
     favorites = db.query(Favorite).filter(Favorite.user_id == current_user["user_id"]).all()
-    # returning just the property objects, not the junction table records
     return [fav.property for fav in favorites]
 
 @app.delete("/favorites/{property_id}", tags=["Favorites"])
@@ -857,7 +750,6 @@ def remove_favorite(
     db.delete(favorite)
     db.commit()
     return {"message": "Property Removed from Favorites"}
-
 
 # ==========================================
 # INQUIRY ROUTES
@@ -890,7 +782,6 @@ def get_my_inquiries(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # if admin, they see everything. otherwise just inquiries for properties they own
     if current_user["role"] == "admin":
         return db.query(Inquiry).all()
     else:
@@ -902,7 +793,6 @@ def get_sent_inquiries(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # returns inquiries that the logged-in user SENT to other property owners
     inquiries = db.query(Inquiry).filter(Inquiry.user_id == current_user["user_id"]).all()
     return inquiries
 
@@ -917,7 +807,6 @@ def update_inquiry_status(
     if not inquiry:
         raise HTTPException(status_code=404, detail="Inquiry Not Found")
     
-    # only the property owner or an admin can change the status (like marking it responded)
     property = db.query(Property).filter(Property.id == inquiry.property_id).first()
     if current_user["role"] != "admin" and property.owner_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Not authorized to update this inquiry")
@@ -928,7 +817,6 @@ def update_inquiry_status(
     db.commit()
     db.refresh(inquiry)
     return {"message": "Inquiry Updated Successfully", "data": inquiry}
-
 
 # ==========================================
 # REVIEW ROUTES
@@ -944,11 +832,9 @@ def create_review(
     if not property:
         raise HTTPException(status_code=404, detail="Property Not Found")
     
-    # gotta make sure rating is 1-5
     if review.rating < 1 or review.rating > 5:
         raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
     
-    # preventing users from spamming reviews on the same property
     existing = db.query(Review).filter(
         Review.user_id == current_user["user_id"],
         Review.property_id == review.property_id
@@ -983,14 +869,12 @@ def delete_review(
     if not review:
         raise HTTPException(status_code=404, detail="Review Not Found")
     
-    # only the person who wrote it (or an admin) can delete it
     if review.user_id != current_user["user_id"] and current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not authorized to delete this review")
     
     db.delete(review)
     db.commit()
     return {"message": "Review Deleted Successfully"}
-
 
 # ==========================================
 # USER ROUTES
@@ -1002,7 +886,6 @@ def get_user(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # auth check: you can only view your own profile unless you're an admin
     if (
         current_user["role"] != "admin"
         and current_user["user_id"] != user_id
@@ -1020,12 +903,10 @@ def update_my_profile(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    # fetching the logged in user's db record
     user = db.query(User).filter(User.id == current_user["user_id"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User Not Found")
 
-    # updating fields. notice they CANNOT update their own role here!
     if updates.name: user.name = updates.name
     if updates.email: user.email = updates.email
     if updates.phone is not None: user.phone = updates.phone
@@ -1035,14 +916,12 @@ def update_my_profile(
     db.refresh(user)
     return {"message": "Profile Updated Successfully", "data": user}
 
-
 # ==========================================
 # HOME ROUTE
 # ==========================================
 
 @app.get("/")
 def home():
-    # just a simple health check route to make sure the server is alive
     return {
         "message": "Real Estate Management API Running Successfully",
         "version": "1.0.0",

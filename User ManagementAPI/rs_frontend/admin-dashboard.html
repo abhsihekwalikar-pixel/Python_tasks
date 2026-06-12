@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Real Estate Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>🏠 Real Estate Platform - Admin Panel</h1>
+        <div class="nav-links">
+            <a href="admin-dashboard.html">Dashboard</a>
+            <a href="index.html">View Properties</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="dashboard-header">
+            <h2>👑 Admin Dashboard</h2>
+            <p id="adminInfo">Loading admin info...</p>
+        </div>
+
+        <!-- System Statistics -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3 id="totalUsers">0</h3>
+                <p>Total Users</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="totalProperties">0</h3>
+                <p>Total Properties</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="totalInquiries">0</h3>
+                <p>Total Inquiries</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="totalAmenities">0</h3>
+                <p>Amenities</p>
+            </div>
+        </div>
+
+        <!-- User Management Section -->
+        <div style="margin-top: 40px;">
+            <h2>👥 All Users</h2>
+            <div id="usersContainer" style="margin-top: 20px;">
+                <p>Loading users...</p>
+            </div>
+        </div>
+
+        <!-- All Properties Section -->
+        <div style="margin-top: 40px;">
+            <h2>🏠 All Properties</h2>
+            <div id="allPropertiesContainer" class="properties-grid">
+                <p>Loading properties...</p>
+            </div>
+        </div>
+
+        <!-- Amenities Management -->
+        <div style="margin-top: 40px;">
+            <h2>⭐ Manage Amenities</h2>
+            <div style="margin-top: 20px;">
+                <input type="text" id="newAmenityName" placeholder="Enter amenity name (e.g., Swimming Pool)" style="width: 300px; padding: 10px; margin-right: 10px;">
+                <button onclick="addAmenity()" class="btn" style="width: auto; display: inline-block; padding: 10px 20px;">Add Amenity</button>
+            </div>
+            <div id="amenitiesContainer" style="margin-top: 20px;">
+                <p>Loading amenities...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        // Check if user is admin
+        if (!requireAuth()) {
+            // Redirect handled
+        } else if (getUserRole() !== 'admin') {
+            alert('Access denied! Admins only.');
+            window.location.href = 'user-dashboard.html';
+        }
+
+        // Load admin dashboard data
+        async function loadAdminDashboard() {
+            try {
+                // Load all users
+                const usersResponse = await fetch(`${API_CONFIG.BASE_URL}/users`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (usersResponse.ok) {
+                    const users = await usersResponse.json();
+                    document.getElementById('totalUsers').textContent = users.length;
+                    
+                    const usersContainer = document.getElementById('usersContainer');
+                    usersContainer.innerHTML = `
+                        <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">
+                            <thead style="background: #2c3e50; color: white;">
+                                <tr>
+                                    <th style="padding: 12px; text-align: left;">ID</th>
+                                    <th style="padding: 12px; text-align: left;">Name</th>
+                                    <th style="padding: 12px; text-align: left;">Email</th>
+                                    <th style="padding: 12px; text-align: left;">Role</th>
+                                    <th style="padding: 12px; text-align: left;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${users.map(user => `
+                                    <tr style="border-bottom: 1px solid #ddd;">
+                                        <td style="padding: 12px;">${user.id}</td>
+                                        <td style="padding: 12px;">${user.name}</td>
+                                        <td style="padding: 12px;">${user.email}</td>
+                                        <td style="padding: 12px;"><span style="background: ${user.role === 'admin' ? '#e74c3c' : '#3498db'}; color: white; padding: 4px 8px; border-radius: 4px;">${user.role}</span></td>
+                                        <td style="padding: 12px;">
+                                            ${user.role !== 'admin' ? `<button onclick="deleteUser(${user.id})" class="btn btn-danger" style="width: auto; padding: 6px 12px; font-size: 12px;">Delete</button>` : 'Protected'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+
+                // Load all properties
+                const propsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.endpoints.properties}`);
+                if (propsResponse.ok) {
+                    const properties = await propsResponse.json();
+                    document.getElementById('totalProperties').textContent = properties.length;
+                    
+                    const container = document.getElementById('allPropertiesContainer');
+                    if (properties.length === 0) {
+                        container.innerHTML = '<p>No properties listed yet.</p>';
+                    } else {
+                        container.innerHTML = properties.map(property => `
+                            <div class="property-card">
+                                <div class="property-info">
+                                    <h3>${property.title}</h3>
+                                    <div class="property-price">$${property.price.toLocaleString()}</div>
+                                    <div class="property-details">
+                                        <p>📍 ${property.city}, ${property.state}</p>
+                                        <p>🏠 ${property.property_type} | ${property.listing_type}</p>
+                                        <p>Owner ID: ${property.owner_id}</p>
+                                    </div>
+                                    <button onclick="deleteProperty(${property.id})" class="btn btn-danger" style="margin-top: 10px;">Delete Property</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                }
+
+                // Load all inquiries
+                const inquiriesResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.endpoints.inquiries}`, {
+                    headers: getAuthHeaders()
+                });
+                if (inquiriesResponse.ok) {
+                    const inquiries = await inquiriesResponse.json();
+                    document.getElementById('totalInquiries').textContent = inquiries.length;
+                }
+
+                // Load amenities
+                const amenitiesResponse = await fetch(`${API_CONFIG.BASE_URL}/amenities`);
+                if (amenitiesResponse.ok) {
+                    const amenities = await amenitiesResponse.json();
+                    document.getElementById('totalAmenities').textContent = amenities.length;
+                    
+                    const amenitiesContainer = document.getElementById('amenitiesContainer');
+                    amenitiesContainer.innerHTML = amenities.map(amenity => `
+                        <div style="display: inline-block; background: #f8f9fa; padding: 10px 15px; margin: 5px; border-radius: 4px;">
+                            ${amenity.name}
+                            <button onclick="deleteAmenity(${amenity.id})" style="background: #e74c3c; color: white; border: none; padding: 2px 8px; margin-left: 10px; border-radius: 4px; cursor: pointer;">×</button>
+                        </div>
+                    `).join('');
+                }
+
+                // Get admin info
+                const adminResponse = await fetch(`${API_CONFIG.BASE_URL}/users/me`, {
+                    headers: getAuthHeaders()
+                });
+                if (adminResponse.ok) {
+                    const admin = await adminResponse.json();
+                    document.getElementById('adminInfo').textContent = 
+                        `Logged in as: ${admin.name} (${admin.email}) - Role: ${admin.role}`;
+                }
+
+            } catch (error) {
+                console.error('Error loading admin dashboard:', error);
+            }
+        }
+
+        // Delete user function
+        async function deleteUser(userId) {
+            if (!confirm('Are you sure you want to delete this user?')) return;
+            
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}/users/${userId}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                
+                if (response.ok) {
+                    alert('User deleted successfully!');
+                    loadAdminDashboard();
+                } else {
+                    const data = await response.json();
+                    alert(data.detail || 'Failed to delete user');
+                }
+            } catch (error) {
+                console.error('Delete user error:', error);
+            }
+        }
+
+        // Delete property function
+        async function deleteProperty(propertyId) {
+            if (!confirm('Are you sure you want to delete this property?')) return;
+            
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}/properties/${propertyId}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                
+                if (response.ok) {
+                    alert('Property deleted successfully!');
+                    loadAdminDashboard();
+                } else {
+                    const data = await response.json();
+                    alert(data.detail || 'Failed to delete property');
+                }
+            } catch (error) {
+                console.error('Delete property error:', error);
+            }
+        }
+
+        // Add amenity function
+        async function addAmenity() {
+            const name = document.getElementById('newAmenityName').value;
+            if (!name) {
+                alert('Please enter an amenity name');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}/amenities`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ name: name })
+                });
+                
+                if (response.ok) {
+                    alert('Amenity added successfully!');
+                    document.getElementById('newAmenityName').value = '';
+                    loadAdminDashboard();
+                } else {
+                    const data = await response.json();
+                    alert(data.detail || 'Failed to add amenity');
+                }
+            } catch (error) {
+                console.error('Add amenity error:', error);
+            }
+        }
+
+        // Delete amenity function
+        async function deleteAmenity(amenityId) {
+            if (!confirm('Are you sure you want to delete this amenity?')) return;
+            
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}/amenities/${amenityId}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                
+                if (response.ok) {
+                    alert('Amenity deleted successfully!');
+                    loadAdminDashboard();
+                } else {
+                    const data = await response.json();
+                    alert(data.detail || 'Failed to delete amenity');
+                }
+            } catch (error) {
+                console.error('Delete amenity error:', error);
+            }
+        }
+
+        // Initialize dashboard
+        loadAdminDashboard();
+    </script>
+</body>
+</html>

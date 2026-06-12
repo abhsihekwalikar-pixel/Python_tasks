@@ -1,3 +1,7 @@
+// ==========================================
+// AUTHENTICATION FUNCTIONS
+// ==========================================
+
 // Register Function
 async function register(email, password, name, role, phone = null) {
     try {
@@ -33,7 +37,7 @@ async function register(email, password, name, role, phone = null) {
     }
 }
 
-// Login Function
+// Login Function - UPDATED WITH ROLE-BASED REDIRECTION
 async function login(email, password) {
     try {
         const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.endpoints.login}`, {
@@ -54,9 +58,21 @@ async function login(email, password) {
             localStorage.setItem('token', data.access_token);
             localStorage.setItem('role', data.role);
             
+            // Decode the JWT token to extract user_id
+            // JWT tokens have 3 parts separated by dots: header.payload.signature
+            const tokenParts = data.access_token.split('.');
+            const payload = JSON.parse(atob(tokenParts[1])); // Decode the middle part (payload)
+            localStorage.setItem('userId', payload.user_id); // Save user_id for later use
+            
             showMessage('Login successful! Redirecting...', 'success');
+            
+            // Redirect to the correct dashboard based on user role
             setTimeout(() => {
-                window.location.href = 'dashboard.html';
+                if (data.role === 'admin') {
+                    window.location.href = 'admin-dashboard.html'; // Admins go to admin dashboard
+                } else {
+                    window.location.href = 'user-dashboard.html'; // Regular users go to user dashboard
+                }
             }, 1000);
         } else {
             showMessage(data.detail || 'Login failed', 'error');
@@ -69,7 +85,11 @@ async function login(email, password) {
     }
 }
 
-// Show message helper
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+// Show message helper (for success/error alerts)
 function showMessage(message, type = 'error') {
     // Remove existing messages
     const existingMsg = document.querySelector('.alert');
@@ -94,6 +114,29 @@ function showMessage(message, type = 'error') {
     }, 5000);
 }
 
+// Check if user is logged in
+function isLoggedIn() {
+    return localStorage.getItem('token') !== null;
+}
+
+// Get current user role
+function getUserRole() {
+    return localStorage.getItem('role');
+}
+
+// Get current user ID
+function getUserId() {
+    return localStorage.getItem('userId');
+}
+
+// Logout function
+function logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    localStorage.removeItem('userId');
+    window.location.href = 'login.html';
+}
+
 // Protect routes (check authentication)
 function requireAuth() {
     if (!isLoggedIn()) {
@@ -101,4 +144,13 @@ function requireAuth() {
         return false;
     }
     return true;
+}
+
+// Helper to get auth headers for API requests
+function getAuthHeaders() {
+    const token = localStorage.getItem('token');
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+    };
 }
