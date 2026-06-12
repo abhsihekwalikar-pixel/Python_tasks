@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Estate Platform - Home</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>🏠 Real Estate Platform</h1>
+        <div class="nav-links" id="navLinks">
+            <!-- Will be populated by JavaScript -->
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="dashboard-header">
+            <h2>Welcome to Real Estate Platform</h2>
+            <p>Find your dream property or list your own properties for sale/rent.</p>
+        </div>
+
+        <h2>Featured Properties</h2>
+        <div id="propertiesContainer" class="properties-grid">
+            <!-- Properties will be loaded here -->
+            <p>Loading properties...</p>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script>
+        // Update navigation based on login status
+        function updateNavigation() {
+            const navLinks = document.getElementById('navLinks');
+            const token = localStorage.getItem('token');
+            const role = localStorage.getItem('role');
+
+            if (token) {
+                navLinks.innerHTML = `
+                    <a href="dashboard.html">Dashboard</a>
+                    <a href="index.html">Properties</a>
+                    <a href="#" onclick="logout()">Logout</a>
+                `;
+            } else {
+                navLinks.innerHTML = `
+                    <a href="login.html">Login</a>
+                    <a href="register.html">Register</a>
+                `;
+            }
+        }
+
+        // Load properties
+        async function loadProperties() {
+            try {
+                const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.endpoints.properties}`);
+                const properties = await response.json();
+
+                const container = document.getElementById('propertiesContainer');
+                
+                if (properties.length === 0) {
+                    container.innerHTML = '<p>No properties available yet.</p>';
+                    return;
+                }
+
+                container.innerHTML = properties.map(property => `
+                    <div class="property-card">
+                        <div class="property-image">
+                            ${property.images && property.images.length > 0 
+                                ? `<img src="${property.images[0].image_url}" alt="${property.title}" style="width:100%;height:100%;object-fit:cover;">`
+                                : 'No Image Available'
+                            }
+                        </div>
+                        <div class="property-info">
+                            <h3>${property.title}</h3>
+                            <div class="property-price">$${property.price.toLocaleString()}</div>
+                            <div class="property-details">
+                                <p>📍 ${property.city}, ${property.state}</p>
+                                <p>🏠 ${property.property_type} | ${property.listing_type}</p>
+                                <p>🛏️ ${property.bedrooms || 'N/A'} beds | 🛁 ${property.bathrooms || 'N/A'} baths</p>
+                            </div>
+                            <p>${property.description ? property.description.substring(0, 100) + '...' : ''}</p>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Error loading properties:', error);
+                document.getElementById('propertiesContainer').innerHTML = 
+                    '<p>Error loading properties. Make sure the backend is running.</p>';
+            }
+        }
+
+        // Initialize page
+        updateNavigation();
+        loadProperties();
+    </script>
+</body>
+</html>
